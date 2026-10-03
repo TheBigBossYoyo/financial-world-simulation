@@ -183,11 +183,16 @@ def compute_max_drawdown(price_path: np.ndarray) -> float:
 
 def compute_sharpe(returns: np.ndarray, risk_free_annual: float = 0.04) -> float:
     """Annualised Sharpe ratio."""
-    if len(returns) == 0 or np.std(returns) == 0:
+    returns = np.asarray(returns, dtype=float)
+    if len(returns) == 0:
         return 0.0
     daily_rf = risk_free_annual / 252
     excess = returns - daily_rf
-    return float(np.mean(excess) / np.std(excess) * np.sqrt(252))
+    std = np.std(excess)
+    # a constant series can have a std of ~1e-18 from rounding, which would blow the ratio up
+    if std <= 1e-12 * max(1.0, float(np.max(np.abs(excess)))):
+        return 0.0
+    return float(np.mean(excess) / std * np.sqrt(252))
 
 
 def _summarise_distribution(values: np.ndarray) -> Dict[str, Any]:
