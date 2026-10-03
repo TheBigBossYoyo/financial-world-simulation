@@ -97,7 +97,7 @@ The plain result is that the forecasters as I built them do not beat the random 
 
 The return-target version fixes that and ends up level with the simple baselines, but not clearly ahead of them. Its skill score is almost the same as the drift and AR(1) baselines, and I think most of the small positive number comes from the test period being a rising market in which a positive mean beats a prediction of zero, not from the networks finding a pattern. I have not tested whether the gap to the drift baseline is statistically meaningful, and with five tickers I would not claim it is. Directional accuracy for drift and the return-target ensemble is above 50% mostly because most of these days and weeks were up.
 
-This is what I expected. Daily equity returns are close to unpredictable because prices already reflect public information, the signal-to-noise ratio is tiny, and a network with many thousands of parameters trained on a few thousand noisy days will mostly fit noise. The honest use of the forecasts is as scenario ranges, as I said above, and the full per-ticker tables are in `docs/forecast_eval_results.md` and `docs/forecast_eval_results.csv`.
+This is not a surprising result. Daily equity returns are close to unpredictable because prices already reflect public information, the signal-to-noise ratio is tiny, and a network with many thousands of parameters trained on a few thousand noisy days will mostly fit noise. The honest use of the forecasts is as scenario ranges, as I said above, and the full per-ticker tables are in `docs/forecast_eval_results.md` and `docs/forecast_eval_results.csv`.
 
 To rerun it:
 
