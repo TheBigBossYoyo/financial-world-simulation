@@ -61,6 +61,63 @@ python -m streamlit run modules/dashboard.py
 
 The first full run downloads FinBERT (a few hundred MB from Hugging Face) and trains the LSTM/TFT models per ticker, which takes a while on CPU. Later runs reuse the saved checkpoints and cached data, so they're much faster. `--dry-run` is meant for iterating on the code without waiting for the full pipeline each time.
 
+## Evaluation
+
+I wanted to know whether the forecasting models are better than doing nothing, so `evaluate_forecasts.py` runs a walk-forward test against naive baselines. For each ticker it uses three expanding-window folds. In each fold the scalers and both networks are fit only on the days before the cutoff and then scored on the next 252 trading days, which they never saw. It uses price-only features from `build_features()` (no sentiment, macro or cross-asset inputs), so it runs without any API keys, and prices come from yfinance (cached in `data/eval_cache/`, which is gitignored). It does not touch the checkpoints in `models/`.
+
+The baselines are a random walk (predict a return of zero), the historical mean return (drift, using only returns up to the forecast date) and an AR(1) model fit on the training window. The metrics are RMSE of the horizon return, directional accuracy, and a skill score, 1 - MSE(model) / MSE(random walk), where a positive number means better than predicting zero.
+
+What I actually ran: NVDA, JPM, NEM, LLY and NOC; horizons of 1, 5 and 20 trading days; forecast origins from 2023-09-28 to 2026-10-02; at most 12 epochs per network with early stopping (patience 3); seed 42. I used five tickers and short training so it finishes on a CPU laptop in roughly 15 to 20 minutes, so treat it as a small experiment and not a full study. The test origins are daily, so the 5 and 20 day targets overlap and the samples are not independent.
+
+I ran two versions of the networks. "As built" follows the pipeline: the target is the next-day Close price and the features include price-level indicators. "Return target" is the same two networks trained on the next-day return with ratio-only features. Averages over the five tickers (the last column counts tickers with positive skill):
+
+| horizon (days) | model | RMSE | directional accuracy | skill vs random walk | tickers beating random walk |
+|---|---|---|---|---|---|
+| 1 | random walk | 0.0218 | n/a | 0.0000 | - |
+| 1 | historical mean (drift) | 0.0217 | 54.3% | 0.0037 | 4/5 |
+| 1 | AR(1) | 0.0217 | 53.5% | 0.0024 | 3/5 |
+| 1 | LSTM+TFT ensemble, as built | 0.0446 | 45.7% | -3.3531 | 0/5 |
+| 1 | LSTM+TFT ensemble, return target | 0.0217 | 53.2% | 0.0045 | 4/5 |
+| 5 | random walk | 0.0488 | n/a | 0.0000 | - |
+| 5 | historical mean (drift) | 0.0483 | 58.1% | 0.0196 | 4/5 |
+| 5 | AR(1) | 0.0482 | 58.0% | 0.0208 | 4/5 |
+| 5 | LSTM+TFT ensemble, as built | 0.1687 | 42.3% | -12.5805 | 0/5 |
+| 5 | LSTM+TFT ensemble, return target | 0.0482 | 56.1% | 0.0235 | 4/5 |
+| 20 | random walk | 0.0970 | n/a | 0.0000 | - |
+| 20 | historical mean (drift) | 0.0930 | 61.0% | 0.0768 | 4/5 |
+| 20 | AR(1) | 0.0929 | 61.0% | 0.0786 | 4/5 |
+| 20 | LSTM+TFT ensemble, as built | 0.2514 | 39.8% | -6.1021 | 0/5 |
+| 20 | LSTM+TFT ensemble, return target | 0.0928 | 58.5% | 0.0795 | 4/5 |
+
+![Skill versus the random walk](docs/figures/forecast_skill_vs_random_walk.png)
+
+![Predicted versus realised returns](docs/figures/forecast_pred_vs_actual.png)
+
+The plain result is that the forecasters as I built them do not beat the random walk. The as-built ensemble is far worse on every ticker and horizon, with directional accuracy below 50%. The scatter plot shows that its predictions pile up at a few large negative values. My reading, which I have not tested separately, is that because the target is a price level and these stocks mostly trade above their training-window range, the standardised inputs fall outside what the networks saw, so they output near-constant numbers that the pipeline's caps then clip. This is a design problem in how I framed the target, and it likely affects the price forecasts that feed the rest of the pipeline too.
+
+The return-target version fixes that and ends up level with the simple baselines, but not clearly ahead of them. Its skill score is almost the same as the drift and AR(1) baselines, and I think most of the small positive number comes from the test period being a rising market in which a positive mean beats a prediction of zero, not from the networks finding a pattern. I have not tested whether the gap to the drift baseline is statistically meaningful, and with five tickers I would not claim it is. Directional accuracy for drift and the return-target ensemble is above 50% mostly because most of these days and weeks were up.
+
+This is what I expected. Daily equity returns are close to unpredictable because prices already reflect public information, the signal-to-noise ratio is tiny, and a network with many thousands of parameters trained on a few thousand noisy days will mostly fit noise. The honest use of the forecasts is as scenario ranges, as I said above, and the full per-ticker tables are in `docs/forecast_eval_results.md` and `docs/forecast_eval_results.csv`.
+
+To rerun it:
+
+```bash
+# default settings used for the table above (roughly 15 to 20 minutes on a CPU)
+python evaluate_forecasts.py --tickers NVDA JPM NEM LLY NOC --folds 3 --epochs 12 --patience 3
+
+# quick smoke run
+python evaluate_forecasts.py --tickers JPM --folds 1 --epochs 3 --out-dir /tmp/eval_check
+```
+
+## Tests
+
+The deterministic parts have a pytest suite that needs no network or API keys: VaR and CVaR against the analytic normal values, Sharpe and max drawdown on hand-computed series, Monte Carlo seeding, portfolio weights summing to 1, agent counts and seeding, and the evaluation metrics and baselines (including a check that the drift baseline cannot see the future and that scalers are fit on the training window only). Writing them turned up one bug: `compute_sharpe` returned infinity for a constant return series because of a rounding-sized standard deviation, and it now returns 0.
+
+```bash
+pip install pytest
+python -m pytest tests
+```
+
 ## What I'd flag as limitations
 
 The price forecasts should not be read as predictions anyone should trade on. They're built from public OHLCV history, news sentiment, and a handful of macro series, over a market that reacts to far more than that. The agent-based simulation is a simplification of how real markets aggregate information; the archetypes and their parameters are hand-tuned guesses at plausible behavior, not calibrated against real trading data. Geopolitical event probabilities in `config.py` are also just estimates I set myself, not derived from any model. I built this as a way to combine several techniques in one pipeline and see how they interact, not as a forecasting tool to rely on.
