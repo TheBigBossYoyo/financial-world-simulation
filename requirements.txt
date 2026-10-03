@@ -30,8 +30,14 @@ plotly>=5.18.0
 # PDF
 reportlab>=4.0.0
 
+# Evaluation figures (evaluate_forecasts.py)
+matplotlib>=3.7.0
+
 # Technical Indicators
 ta>=0.11.0
 
 # Environment
 python-dotenv>=1.0.0
+
+# Development (tests): pip install pytest, then run `python -m pytest tests`
+pytest>=7.0.0

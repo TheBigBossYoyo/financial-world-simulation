@@ -15,3 +15,6 @@ models/*.pt
 models/*.pkl
 data/*.db
 reports/*.log
+
+# Cached price downloads for evaluate_forecasts.py
+data/eval_cache/
